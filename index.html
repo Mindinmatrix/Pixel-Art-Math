@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pixel Art Math</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <section class="hero">
+      <h1 id="appTitle">Pixel Art Math</h1>
+      <p id="appSubtitle">Choose a grade and skill, then reveal a hidden pixel picture as correct answers are entered.</p>
+    </section>
+
+    <section class="main">
+      <aside class="panel controls">
+        <div class="row two">
+          <div class="row">
+            <label for="themeSelect">Theme</label>
+            <select id="themeSelect"></select>
+          </div>
+          <div class="row">
+            <label for="shapeSelect">Picture</label>
+            <select id="shapeSelect">
+              <option value="random">Random</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row two">
+          <div class="row">
+            <label for="gradeSelect">Grade</label>
+            <select id="gradeSelect"></select>
+          </div>
+          <div class="row">
+            <label for="skillSelect">Skill</label>
+            <select id="skillSelect"></select>
+          </div>
+        </div>
+
+        <div class="btns">
+          <button class="primary" id="newPuzzleBtn" type="button">New Puzzle</button>
+          <button class="secondary" id="resetBtn" type="button">Reset Answers</button>
+        </div>
+
+        <button class="secondary" id="solveAllBtn" type="button" hidden>Solve All Test Answers</button>
+
+        <div class="stats">
+          <div class="stat"><div class="num" id="correctCount">0</div><div class="label">Correct</div></div>
+          <div class="stat"><div class="num" id="progressCount">0%</div><div class="label">Picture</div></div>
+          <div class="stat"><div class="num" id="shapeName">Random</div><div class="label">Shape</div></div>
+        </div>
+
+        <div class="skill-card">
+          <div class="skill-kicker" id="skillGradeLabel">Grade 7</div>
+          <div class="skill-title" id="skillTitle">Fractions: Add &amp; Subtract</div>
+          <div class="skill-copy" id="skillDescription">Practice core middle school math skills while building a pixel picture one answer at a time.</div>
+        </div>
+
+        <div class="tip" id="tipBox"></div>
+
+        <div class="celebrate" id="celebrateBox">Amazing work - the whole picture is revealed.</div>
+        <div class="test-panel" id="testPanel" aria-live="polite"></div>
+      </aside>
+
+      <section class="panel workspace">
+        <div class="pixel-wrap">
+          <div class="pixel-head">
+            <div class="pixel-title">Hidden Picture</div>
+            <div class="progress" id="pixelProgressText">0 of 20 answers correct</div>
+          </div>
+          <div class="grid" id="pixelGrid" aria-label="pixel art grid"></div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 70px;">#</th>
+                <th>Problem</th>
+                <th class="answer-column">
+                  <div class="answer-header-label">Your Answer</div>
+                  <div class="answer-guide" id="answerGuide"></div>
+                </th>
+                <th style="width: 120px;">Status</th>
+              </tr>
+            </thead>
+            <tbody id="questionBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </div>
+
+  <script src="shapes.js"></script>
+  <script src="colors.js"></script>
+  <script src="curriculum.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
