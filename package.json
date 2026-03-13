@@ -1,0 +1,14 @@
+{
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  },
+  "name": "your-project-name",
+  "version": "0.1.0",
+  "homepage": "https://Mindinmatrix.github.io/Pixel-Art-Math",
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build"
+  }
+}
