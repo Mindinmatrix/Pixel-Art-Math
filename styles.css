@@ -1,4 +1,5 @@
 :root {
+  --grid-size: 16;
   --bg1: #0f172a;
   --bg2: #1e293b;
   --panel: rgba(255, 255, 255, 0.94);
@@ -16,9 +17,10 @@
   --blank: #ffffff;
   --shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
   --radius: 22px;
-  --cell-size: 28px;
-  --grid-gap: 4px;
+  --cell-size: 22px;
+  --grid-gap: 3px;
   --pixel-lift: 12px;
+  --pixel-side-depth: 8px;
   --board-tilt-x: 24deg;
   --board-tilt-y: -10deg;
 }
@@ -273,6 +275,13 @@ button:active {
   font-weight: 900;
 }
 
+.pixel-hint {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .progress {
   color: var(--muted);
   font-weight: 700;
@@ -281,15 +290,11 @@ button:active {
 
 .grid {
   position: relative;
-  display: grid;
-  grid-template-columns: repeat(12, var(--cell-size));
-  grid-template-rows: repeat(12, var(--cell-size));
-  gap: var(--grid-gap);
-  padding: 22px;
+  width: min(100%, 720px);
+  aspect-ratio: 1;
   overflow: visible;
   isolation: isolate;
-  transform-style: preserve-3d;
-  transform: perspective(1400px) rotateX(var(--board-tilt-x)) rotateY(var(--board-tilt-y));
+  user-select: none;
   background:
     linear-gradient(160deg, #dbe7f4, #9fb3c9 58%, #8497ad),
     linear-gradient(180deg, rgba(255, 255, 255, 0.4), rgba(255, 255, 255, 0));
@@ -299,6 +304,10 @@ button:active {
     inset 0 1px 0 rgba(255, 255, 255, 0.85),
     inset 0 -8px 18px rgba(71, 85, 105, 0.12),
     0 28px 34px rgba(15, 23, 42, 0.24);
+}
+
+.grid.grid-canvas {
+  padding: 18px;
 }
 
 .grid::before {
@@ -323,8 +332,35 @@ button:active {
   z-index: 3;
 }
 
+.grid.grid-dom {
+  display: grid;
+  grid-template-columns: repeat(var(--grid-size), var(--cell-size));
+  grid-template-rows: repeat(var(--grid-size), var(--cell-size));
+  gap: var(--grid-gap);
+  padding: 20px;
+  cursor: grab;
+  touch-action: none;
+  will-change: transform;
+  transform-style: preserve-3d;
+  transform: perspective(1400px) rotateX(var(--board-tilt-x)) rotateY(var(--board-tilt-y));
+}
+
+.grid.grid-dom.dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+.board-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  background: transparent;
+}
+
 .cell {
   position: relative;
+  overflow: visible;
   width: var(--cell-size);
   height: var(--cell-size);
   border-radius: 8px;
@@ -350,28 +386,43 @@ button:active {
 }
 
 .cell.filled {
-  background: var(--pixel, #111827);
+  z-index: 2;
+  background: var(--tone-color, var(--pixel, #111827));
   background: linear-gradient(
     145deg,
-    color-mix(in srgb, var(--pixel) 62%, white),
-    var(--pixel) 58%,
-    color-mix(in srgb, var(--pixel) 68%, black)
+    color-mix(in srgb, var(--tone-color, var(--pixel)) 62%, white),
+    var(--tone-color, var(--pixel)) 58%,
+    color-mix(in srgb, var(--tone-color, var(--pixel)) 68%, black)
   );
-  transform: translateZ(var(--pixel-lift));
-  border-color: var(--pixel, #111827);
-  border-color: color-mix(in srgb, var(--pixel) 58%, black);
+  transform: translateZ(var(--pixel-lift)) translateY(calc(var(--pixel-lift) * -0.03));
+  border-color: var(--tone-color, var(--pixel, #111827));
+  border-color: color-mix(in srgb, var(--tone-color, var(--pixel)) 58%, black);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset -4px -4px 0 rgba(0, 0, 0, 0.16),
-    0 12px 0 rgba(15, 23, 42, 0.22),
-    0 20px 24px var(--pixel-glow, rgba(17, 24, 39, 0.18)),
-    0 14px 22px rgba(15, 23, 42, 0.26);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    inset -4px -4px 0 color-mix(in srgb, var(--pixel) 60%, black),
-    0 12px 0 color-mix(in srgb, var(--pixel) 45%, black),
-    0 20px 24px var(--pixel-glow, rgba(17, 24, 39, 0.18)),
-    0 14px 22px rgba(15, 23, 42, 0.26);
+    inset -4px -4px 0 color-mix(in srgb, var(--tone-color, var(--pixel)) 60%, black),
+    0 calc(var(--pixel-lift) * 0.95) 0 color-mix(in srgb, var(--tone-color, var(--pixel)) 45%, black),
+    0 calc(var(--pixel-lift) * 1.55) calc(var(--pixel-lift) * 1.85) var(--tone-glow, var(--pixel-glow, rgba(17, 24, 39, 0.18))),
+    0 calc(var(--pixel-lift) * 1.2) calc(var(--pixel-lift) * 1.8) rgba(15, 23, 42, 0.26);
+}
+
+.cell.filled::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: calc(var(--pixel-side-depth) * -1);
+  width: var(--pixel-side-depth);
+  height: calc(100% - 3px);
+  border-radius: 0 6px 8px 0;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--tone-color, var(--pixel)) 54%, white),
+    color-mix(in srgb, var(--tone-color, var(--pixel)) 72%, black)
+  );
+  transform: skewY(45deg);
+  transform-origin: left top;
+  box-shadow: 2px 2px 7px rgba(15, 23, 42, 0.16);
+  opacity: 0.92;
+  pointer-events: none;
 }
 
 .table-wrap {
@@ -591,7 +642,7 @@ tbody tr.simplify-row {
 
 @media (max-width: 720px) {
   :root {
-    --cell-size: 22px;
+    --cell-size: 16px;
     --grid-gap: 2px;
     --pixel-lift: 8px;
     --board-tilt-x: 18deg;
@@ -609,11 +660,15 @@ tbody tr.simplify-row {
   }
 
   .grid {
-    padding: 16px;
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.85),
       inset 0 -6px 14px rgba(71, 85, 105, 0.12),
       0 18px 22px rgba(15, 23, 42, 0.22);
+  }
+
+  .grid.grid-dom,
+  .grid.grid-canvas {
+    padding: 16px;
   }
 
   .cell {

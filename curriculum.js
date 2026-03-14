@@ -156,41 +156,41 @@
   }
 
   function buildOneStepEquationQuestion() {
-    const solution = randInt(-12, 12);
+    const xValue = randInt(-12, 12);
     const mode = pick(["add", "subtract", "multiply", "divide"]);
 
     if (mode === "add") {
       const offset = randInt(-12, 12);
       return {
-        text: `Solve: x ${formatSignedNumber(offset)} = ${solution + offset}`,
+        text: `Solve: x ${formatSignedNumber(offset)} = ${xValue + offset}`,
         answerType: "text",
-        solution: createRational(solution, 1)
+        solution: createRational(xValue, 1)
       };
     }
 
     if (mode === "subtract") {
       const offset = randInt(-12, 12);
       return {
-        text: `Solve: x - ${formatInt(offset)} = ${solution - offset}`,
+        text: `Solve: x - ${formatInt(offset)} = ${xValue - offset}`,
         answerType: "text",
-        solution: createRational(solution, 1)
+        solution: createRational(xValue, 1)
       };
     }
 
     if (mode === "multiply") {
       const coefficient = pick([-9, -8, -6, -4, -3, -2, 2, 3, 4, 5, 6, 8, 9]);
       return {
-        text: `Solve: ${formatLinearTerm(coefficient)} = ${coefficient * solution}`,
+        text: `Solve: ${formatLinearTerm(coefficient)} = ${coefficient * xValue}`,
         answerType: "text",
-        solution: createRational(solution, 1)
+        solution: createRational(xValue, 1)
       };
     }
 
     const divisor = pick([2, 3, 4, 5, 6, 8, 10]);
     return {
-      text: `Solve: x / ${divisor} = ${solution}`,
+      text: `Solve: x / ${divisor} = ${xValue}`,
       answerType: "text",
-      solution: createRational(solution * divisor, 1)
+      solution: createRational(xValue * divisor, 1)
     };
   }
 
@@ -242,16 +242,16 @@
   }
 
   function buildTwoStepEquationQuestion() {
-    const solution = randInt(-12, 12);
+    const xValue = randInt(-12, 12);
     const mode = pick(["add", "subtract", "divide"]);
 
     if (mode === "add") {
       const coefficient = pick([-8, -6, -4, -3, -2, 2, 3, 4, 5, 6, 8]);
       const offset = randInt(-12, 12);
       return {
-        text: `Solve: ${formatLinearTerm(coefficient)} ${formatSignedNumber(offset)} = ${(coefficient * solution) + offset}`,
+        text: `Solve: ${formatLinearTerm(coefficient)} ${formatSignedNumber(offset)} = ${(coefficient * xValue) + offset}`,
         answerType: "text",
-        solution: createRational(solution, 1)
+        solution: createRational(xValue, 1)
       };
     }
 
@@ -259,19 +259,19 @@
       const coefficient = pick([-8, -6, -4, -3, -2, 2, 3, 4, 5, 6, 8]);
       const offset = randInt(1, 12);
       return {
-        text: `Solve: ${formatLinearTerm(coefficient)} - ${offset} = ${(coefficient * solution) - offset}`,
+        text: `Solve: ${formatLinearTerm(coefficient)} - ${offset} = ${(coefficient * xValue) - offset}`,
         answerType: "text",
-        solution: createRational(solution, 1)
+        solution: createRational(xValue, 1)
       };
     }
 
     const divisor = pick([2, 3, 4, 5, 6, 8]);
     const offset = randInt(-10, 10);
-    const rightSide = solution + offset;
+    const rightSide = (xValue / divisor) + offset;
     return {
       text: `Solve: x / ${divisor} ${formatSignedNumber(offset)} = ${rightSide}`,
       answerType: "text",
-      solution: createRational((rightSide - offset) * divisor, 1)
+      solution: createRational(xValue, 1)
     };
   }
 
@@ -314,16 +314,71 @@
     };
   }
 
+  const areas = [
+    {
+      id: "math",
+      label: "Math",
+      description: "Middle school math practice built around grades, subjects, and skills."
+    }
+  ];
+
   const grades = [
     { id: "grade7", label: "Grade 7" },
     { id: "grade8", label: "Grade 8" },
     { id: "grade9", label: "Grade 9" }
   ];
 
+  const subjects = [
+    {
+      id: "grade7-number-sense",
+      area: "math",
+      grade: "grade7",
+      label: "Number Sense",
+      description: "Build fluency with fractions, integers, and benchmark percents."
+    },
+    {
+      id: "grade7-proportional-reasoning",
+      area: "math",
+      grade: "grade7",
+      label: "Proportional Reasoning",
+      description: "Practice ratios, rates, percents, and other comparison thinking."
+    },
+    {
+      id: "grade8-algebra-foundations",
+      area: "math",
+      grade: "grade8",
+      label: "Algebra Foundations",
+      description: "Work on equations and exponent ideas that support later algebra."
+    },
+    {
+      id: "grade8-geometry",
+      area: "math",
+      grade: "grade8",
+      label: "Geometry",
+      description: "Use geometric relationships and right-triangle reasoning."
+    },
+    {
+      id: "grade9-algebra",
+      area: "math",
+      grade: "grade9",
+      label: "Algebra",
+      description: "Solve multi-step equations and build algebraic confidence."
+    },
+    {
+      id: "grade9-functions-graphing",
+      area: "math",
+      grade: "grade9",
+      label: "Functions & Graphing",
+      description: "Connect equations, coordinates, and slope in early high school math."
+    }
+  ];
+
   const skills = [
     {
       id: "grade7-fractions",
+      area: "math",
       grade: "grade7",
+      subject: "grade7-number-sense",
       label: "Fractions: Add & Subtract",
       description: "Practice adding and subtracting unlike fractions and simplify answers as mixed numbers when needed.",
       answerType: "mixedFraction",
@@ -332,7 +387,9 @@
     },
     {
       id: "grade7-integers",
+      area: "math",
       grade: "grade7",
+      subject: "grade7-number-sense",
       label: "Integers: Four Operations",
       description: "Work with positive and negative integers using addition, subtraction, multiplication, and division.",
       answerType: "text",
@@ -341,7 +398,9 @@
     },
     {
       id: "grade7-percents",
+      area: "math",
       grade: "grade7",
+      subject: "grade7-proportional-reasoning",
       label: "Percents of a Number",
       description: "Find benchmark percents of whole numbers, including common classroom percents like 25%, 50%, and 75%.",
       answerType: "text",
@@ -350,7 +409,9 @@
     },
     {
       id: "grade7-ratios",
+      area: "math",
       grade: "grade7",
+      subject: "grade7-proportional-reasoning",
       label: "Equivalent Ratios",
       description: "Fill in the missing value in proportion and ratio equations.",
       answerType: "text",
@@ -359,7 +420,9 @@
     },
     {
       id: "grade8-equations",
+      area: "math",
       grade: "grade8",
+      subject: "grade8-algebra-foundations",
       label: "One-Step Equations",
       description: "Solve one-step equations with addition, subtraction, multiplication, and division.",
       answerType: "text",
@@ -368,7 +431,9 @@
     },
     {
       id: "grade8-exponents",
+      area: "math",
       grade: "grade8",
+      subject: "grade8-algebra-foundations",
       label: "Exponents",
       description: "Evaluate integer powers, including problems with negative bases written in parentheses.",
       answerType: "text",
@@ -377,7 +442,9 @@
     },
     {
       id: "grade8-pythagorean",
+      area: "math",
       grade: "grade8",
+      subject: "grade8-geometry",
       label: "Pythagorean Theorem",
       description: "Use common right-triangle triples to find a missing side quickly and accurately.",
       answerType: "text",
@@ -386,7 +453,9 @@
     },
     {
       id: "grade9-two-step",
+      area: "math",
       grade: "grade9",
+      subject: "grade9-algebra",
       label: "Two-Step Equations",
       description: "Solve multi-step linear equations involving coefficients, division, and signed constants.",
       answerType: "text",
@@ -395,7 +464,9 @@
     },
     {
       id: "grade9-slope",
+      area: "math",
       grade: "grade9",
+      subject: "grade9-functions-graphing",
       label: "Slope from Two Points",
       description: "Find rise over run from coordinate pairs and simplify the slope when needed.",
       answerType: "text",
@@ -404,7 +475,9 @@
     },
     {
       id: "grade9-linear-values",
+      area: "math",
       grade: "grade9",
+      subject: "grade9-functions-graphing",
       label: "Linear Functions",
       description: "Evaluate linear equations by substituting an x-value and solving for y.",
       answerType: "text",
@@ -413,5 +486,11 @@
     }
   ];
 
-  window.PixelMathCurriculum = { grades, skills };
+  window.PixelMathCurriculum = {
+    defaultArea: "math",
+    areas,
+    grades,
+    subjects,
+    skills
+  };
 }());

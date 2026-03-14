@@ -1,6 +1,15 @@
 window.PixelArtColors = {
   Cute: {
-    Heart: { pixel: "#ec4899", glow: "rgba(236,72,153,0.28)" },
+    Heart: {
+      pixel: "#ff1f1f",
+      glow: "rgba(255,31,31,0.28)",
+      outline: "#111111",
+      outlineGlow: "rgba(17,17,17,0.18)",
+      highlight: "#fff8f8",
+      highlightGlow: "rgba(255,248,248,0.14)",
+      shadow: "#b91c1c",
+      shadowGlow: "rgba(185,28,28,0.22)"
+    },
     Butterfly: { pixel: "#a855f7", glow: "rgba(168,85,247,0.28)" },
     Diamond: { pixel: "#06b6d4", glow: "rgba(6,182,212,0.28)" },
     Flower: { pixel: "#f97316", glow: "rgba(249,115,22,0.28)" },

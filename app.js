@@ -1,23 +1,53 @@
-const GRID_SIZE = 12;
+const GRID_SIZE = 16;
 const QUESTION_COUNT = 20;
+const DEFAULT_BOARD_TILT_X = 24;
+const DEFAULT_BOARD_TILT_Y = -10;
+const MIN_BOARD_TILT_X = 4;
+const MAX_BOARD_TILT_X = 42;
+const MIN_BOARD_TILT_Y = -34;
+const MAX_BOARD_TILT_Y = 34;
+const BOARD_DRAG_SENSITIVITY = 0.18;
 
 const themes = window.PixelArtShapes || {};
 const themeColors = window.PixelArtColors || {};
-const curriculum = window.PixelMathCurriculum || { grades: [], skills: [] };
+const curriculum = window.PixelMathCurriculum || { areas: [], grades: [], subjects: [], skills: [] };
 const themeNames = Object.keys(themes);
+const areaCatalog = curriculum.areas || [];
 const gradeCatalog = curriculum.grades || [];
+const subjectCatalog = curriculum.subjects || [];
 const allSkills = curriculum.skills || [];
 
+const defaultArea = curriculum.defaultArea || areaCatalog[0]?.id || "math";
+const defaultGrade = gradeCatalog[0]?.id || "grade7";
+const defaultSubject = subjectCatalog.find((subject) => subject.area === defaultArea && subject.grade === defaultGrade)?.id || "";
+const defaultSkill = allSkills.find((skill) => (
+  skill.area === defaultArea && skill.grade === defaultGrade && skill.subject === defaultSubject
+))?.id || allSkills[0]?.id || "";
+
 const state = {
+  area: defaultArea,
   theme: themeNames[0] || "Cute",
   shape: "Heart",
-  grade: gradeCatalog[0]?.id || "grade7",
-  skillId: allSkills[0]?.id || "",
+  grade: defaultGrade,
+  subjectId: defaultSubject,
+  skillId: defaultSkill,
+  boardTiltX: DEFAULT_BOARD_TILT_X,
+  boardTiltY: DEFAULT_BOARD_TILT_Y,
   questions: [],
   answers: []
 };
 
 const els = {};
+let boardRenderer = null;
+let boardRendererUnavailable = false;
+const boardDrag = {
+  active: false,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  startTiltX: DEFAULT_BOARD_TILT_X,
+  startTiltY: DEFAULT_BOARD_TILT_Y
+};
 
 function gcd(a, b) {
   let x = Math.abs(a);
@@ -28,6 +58,14 @@ function gcd(a, b) {
     x = temp;
   }
   return x || 1;
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function isFilledCell(cell) {
+  return cell !== "." && cell !== "" && cell != null;
 }
 
 function createRational(num, den) {
@@ -57,24 +95,218 @@ function getShapesForTheme(theme) {
   return Object.keys(themes[theme] || {});
 }
 
-function getPattern(theme, shape) {
+function makeBlankPattern(size = GRID_SIZE) {
+  return Array.from({ length: size }, () => ".".repeat(size));
+}
+
+function sanitizePatternRows(pattern) {
+  if (!Array.isArray(pattern) || pattern.length === 0) {
+    return makeBlankPattern(1);
+  }
+
+  const width = pattern.reduce((max, row) => Math.max(max, String(row).length), 0) || 1;
+  return pattern.map((row) => (
+    [...String(row).padEnd(width, ".")].map((cell) => (cell === "." || cell === " " ? "." : cell)).join("")
+  ));
+}
+
+function getShapeEntry(theme, shape) {
   return themes[theme]?.[shape] ?? themes.Cute?.Heart ?? [];
 }
 
-function getShapeColors(theme, shape) {
-  return themeColors[theme]?.[shape] ?? { pixel: "#111827", glow: "rgba(17, 24, 39, 0.18)" };
+function getShapeDefinition(theme, shape) {
+  const entry = getShapeEntry(theme, shape);
+  if (Array.isArray(entry)) {
+    return {
+      pattern: entry,
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      lift: null,
+      toneMap: {}
+    };
+  }
+
+  return {
+    pattern: Array.isArray(entry?.pattern) ? entry.pattern : themes.Cute?.Heart ?? [],
+    scale: Number.isFinite(entry?.scale) ? entry.scale : 1,
+    offsetX: Number.isFinite(entry?.offsetX) ? entry.offsetX : 0,
+    offsetY: Number.isFinite(entry?.offsetY) ? entry.offsetY : 0,
+    lift: Number.isFinite(entry?.lift) ? entry.lift : null,
+    toneMap: typeof entry?.toneMap === "object" && entry.toneMap ? entry.toneMap : {}
+  };
 }
 
-function getSkillsForGrade(grade) {
-  return allSkills.filter((skill) => skill.grade === grade);
+function trimPattern(pattern) {
+  const rows = sanitizePatternRows(pattern);
+  let minRow = rows.length;
+  let maxRow = -1;
+  let minCol = rows[0]?.length ?? 0;
+  let maxCol = -1;
+
+  rows.forEach((row, rowIndex) => {
+    [...row].forEach((cell, colIndex) => {
+      if (!isFilledCell(cell)) {
+        return;
+      }
+
+      minRow = Math.min(minRow, rowIndex);
+      maxRow = Math.max(maxRow, rowIndex);
+      minCol = Math.min(minCol, colIndex);
+      maxCol = Math.max(maxCol, colIndex);
+    });
+  });
+
+  if (maxRow === -1 || maxCol === -1) {
+    return { rows: ["."] };
+  }
+
+  return {
+    rows: rows.slice(minRow, maxRow + 1).map((row) => row.slice(minCol, maxCol + 1))
+  };
+}
+
+function scalePattern(pattern, targetWidth, targetHeight) {
+  const rows = sanitizePatternRows(pattern);
+  const sourceHeight = rows.length;
+  const sourceWidth = rows[0]?.length ?? 1;
+
+  if (sourceWidth === targetWidth && sourceHeight === targetHeight) {
+    return rows;
+  }
+
+  return Array.from({ length: targetHeight }, (_, targetRow) => {
+    const sourceRow = Math.min(sourceHeight - 1, Math.floor((targetRow / targetHeight) * sourceHeight));
+    let nextRow = "";
+
+    for (let targetCol = 0; targetCol < targetWidth; targetCol += 1) {
+      const sourceCol = Math.min(sourceWidth - 1, Math.floor((targetCol / targetWidth) * sourceWidth));
+      nextRow += isFilledCell(rows[sourceRow][sourceCol]) ? rows[sourceRow][sourceCol] : ".";
+    }
+
+    return nextRow;
+  });
+}
+
+function normalizePattern(pattern, options = {}) {
+  const gridSize = options.gridSize ?? GRID_SIZE;
+  const definitionScale = Number.isFinite(options.scale) ? options.scale : 1;
+  const offsetX = Math.round(options.offsetX || 0);
+  const offsetY = Math.round(options.offsetY || 0);
+  const trimmed = trimPattern(pattern).rows;
+  const sourceHeight = trimmed.length;
+  const sourceWidth = trimmed[0]?.length ?? 1;
+  const maxFitScale = Math.min(gridSize / sourceWidth, gridSize / sourceHeight);
+  const baselineScale = Math.max(1, gridSize / 12);
+  const defaultScale = Math.min(maxFitScale, baselineScale);
+  const finalScale = Math.max(0.1, Math.min(maxFitScale, defaultScale * definitionScale));
+  const targetWidth = Math.max(1, Math.min(gridSize, Math.round(sourceWidth * finalScale)));
+  const targetHeight = Math.max(1, Math.min(gridSize, Math.round(sourceHeight * finalScale)));
+  const scaled = scalePattern(trimmed, targetWidth, targetHeight);
+  const startCol = Math.max(0, Math.min(gridSize - targetWidth, Math.round(((gridSize - targetWidth) / 2) + offsetX)));
+  const startRow = Math.max(0, Math.min(gridSize - targetHeight, Math.round(((gridSize - targetHeight) / 2) + offsetY)));
+  const grid = Array.from({ length: gridSize }, () => Array(gridSize).fill("."));
+
+  scaled.forEach((row, rowIndex) => {
+    [...row].forEach((cell, colIndex) => {
+      if (isFilledCell(cell)) {
+        grid[startRow + rowIndex][startCol + colIndex] = cell;
+      }
+    });
+  });
+
+  return grid.map((row) => row.join(""));
+}
+
+function getRenderedShape(theme, shape) {
+  const definition = getShapeDefinition(theme, shape);
+  return {
+    ...definition,
+    pattern: normalizePattern(definition.pattern, {
+      gridSize: GRID_SIZE,
+      scale: definition.scale,
+      offsetX: definition.offsetX,
+      offsetY: definition.offsetY
+    })
+  };
+}
+
+function getPattern(theme, shape) {
+  return getRenderedShape(theme, shape).pattern;
+}
+
+function getShapeColors(theme, shape) {
+  return {
+    pixel: "#111827",
+    glow: "rgba(17, 24, 39, 0.18)",
+    outline: "#0b1120",
+    outlineGlow: "rgba(15, 23, 42, 0.18)",
+    highlight: "#f8fafc",
+    highlightGlow: "rgba(248, 250, 252, 0.14)",
+    shadow: "color-mix(in srgb, var(--pixel) 72%, black)",
+    shadowGlow: "rgba(15, 23, 42, 0.22)",
+    ...(themeColors[theme]?.[shape] ?? {})
+  };
+}
+
+function getToneForCell(symbol, toneMap) {
+  if (!isFilledCell(symbol)) {
+    return "";
+  }
+
+  return toneMap?.[symbol] ?? "fill";
+}
+
+function applyCellTone(cell, tone) {
+  const colorValue = tone === "outline"
+    ? "var(--pixel-outline)"
+    : tone === "highlight"
+      ? "var(--pixel-highlight)"
+      : tone === "shadow"
+        ? "var(--pixel-shadow)"
+        : "var(--pixel)";
+  const glowValue = tone === "outline"
+    ? "var(--pixel-outline-glow)"
+    : tone === "highlight"
+      ? "var(--pixel-highlight-glow)"
+      : tone === "shadow"
+        ? "var(--pixel-shadow-glow)"
+        : "var(--pixel-glow)";
+  cell.style.setProperty("--tone-color", colorValue);
+  cell.style.setProperty("--tone-glow", glowValue);
 }
 
 function getGradeLabel(grade) {
   return gradeCatalog.find((entry) => entry.id === grade)?.label ?? grade;
 }
 
+function getSubjectsForGrade(grade) {
+  return subjectCatalog.filter((subject) => subject.area === state.area && subject.grade === grade);
+}
+
+function getSubjectById(subjectId) {
+  return subjectCatalog.find((subject) => subject.id === subjectId)
+    ?? getSubjectsForGrade(state.grade)[0]
+    ?? null;
+}
+
+function getCurrentSubject() {
+  return getSubjectById(state.subjectId);
+}
+
+function getSkillsForSelection(grade, subjectId) {
+  return allSkills.filter((skill) => (
+    skill.area === state.area
+    && skill.grade === grade
+    && skill.subject === subjectId
+  ));
+}
+
 function getSkillById(skillId) {
-  return allSkills.find((skill) => skill.id === skillId) ?? getSkillsForGrade(state.grade)[0] ?? allSkills[0] ?? null;
+  return allSkills.find((skill) => skill.id === skillId)
+    ?? getSkillsForSelection(state.grade, state.subjectId)[0]
+    ?? allSkills[0]
+    ?? null;
 }
 
 function getCurrentSkill() {
@@ -90,9 +322,11 @@ function makeEmptyAnswer(answerType) {
 function cacheElements() {
   els.appTitle = document.getElementById("appTitle");
   els.appSubtitle = document.getElementById("appSubtitle");
+  els.pixelWrap = document.querySelector(".pixel-wrap");
   els.themeSelect = document.getElementById("themeSelect");
   els.shapeSelect = document.getElementById("shapeSelect");
   els.gradeSelect = document.getElementById("gradeSelect");
+  els.subjectSelect = document.getElementById("subjectSelect");
   els.skillSelect = document.getElementById("skillSelect");
   els.skillGradeLabel = document.getElementById("skillGradeLabel");
   els.skillTitle = document.getElementById("skillTitle");
@@ -116,9 +350,11 @@ function requiredElementsExist() {
   return [
     "appTitle",
     "appSubtitle",
+    "pixelWrap",
     "themeSelect",
     "shapeSelect",
     "gradeSelect",
+    "subjectSelect",
     "skillSelect",
     "skillGradeLabel",
     "skillTitle",
@@ -172,8 +408,26 @@ function populateGradeSelect() {
   els.gradeSelect.value = state.grade;
 }
 
+function populateSubjectSelect() {
+  const subjects = getSubjectsForGrade(state.grade);
+  els.subjectSelect.innerHTML = "";
+
+  subjects.forEach((subject) => {
+    const option = document.createElement("option");
+    option.value = subject.id;
+    option.textContent = subject.label;
+    els.subjectSelect.appendChild(option);
+  });
+
+  if (!subjects.some((subject) => subject.id === state.subjectId)) {
+    state.subjectId = subjects[0]?.id || "";
+  }
+
+  els.subjectSelect.value = state.subjectId;
+}
+
 function populateSkillSelect() {
-  const skills = getSkillsForGrade(state.grade);
+  const skills = getSkillsForSelection(state.grade, state.subjectId);
   els.skillSelect.innerHTML = "";
 
   skills.forEach((skill) => {
@@ -204,41 +458,187 @@ function getCurrentPattern() {
   return getPattern(state.theme, state.shape);
 }
 
+function initializeBoardRenderer() {
+  if (boardRenderer || boardRendererUnavailable || !els.pixelGrid || typeof window.PixelBoardCanvas !== "function") {
+    return;
+  }
+
+  try {
+    boardRenderer = new window.PixelBoardCanvas(els.pixelGrid, { gridSize: GRID_SIZE });
+    els.pixelGrid.classList.add("grid-canvas");
+    els.pixelGrid.classList.remove("grid-dom");
+  } catch (error) {
+    boardRendererUnavailable = true;
+    boardRenderer = null;
+    els.pixelGrid.innerHTML = "";
+    els.pixelGrid.classList.remove("grid-canvas");
+    console.warn("Canvas board renderer could not start. Falling back to the DOM grid.", error);
+  }
+}
+
+function resetBoardView() {
+  if (boardRenderer) {
+    boardRenderer.resetView();
+    return;
+  }
+
+  resetBoardTilt();
+}
+
 function buildPixelGrid() {
-  els.pixelGrid.innerHTML = "";
-  const pattern = getCurrentPattern();
+  const renderedShape = getRenderedShape(state.theme, state.shape);
   const colors = getShapeColors(state.theme, state.shape);
+  initializeBoardRenderer();
+
+  if (boardRenderer) {
+    els.pixelGrid.classList.add("grid-canvas");
+    els.pixelGrid.classList.remove("grid-dom");
+    boardRenderer.setSprite(renderedShape, colors);
+    return;
+  }
+
+  els.pixelGrid.classList.remove("grid-canvas");
+  els.pixelGrid.classList.add("grid-dom");
+  els.pixelGrid.innerHTML = "";
+  const pattern = renderedShape.pattern;
   els.pixelGrid.style.setProperty("--pixel", colors.pixel);
   els.pixelGrid.style.setProperty("--pixel-glow", colors.glow);
+  els.pixelGrid.style.setProperty("--pixel-outline", colors.outline);
+  els.pixelGrid.style.setProperty("--pixel-outline-glow", colors.outlineGlow);
+  els.pixelGrid.style.setProperty("--pixel-highlight", colors.highlight);
+  els.pixelGrid.style.setProperty("--pixel-highlight-glow", colors.highlightGlow);
+  els.pixelGrid.style.setProperty("--pixel-shadow", colors.shadow);
+  els.pixelGrid.style.setProperty("--pixel-shadow-glow", colors.shadowGlow);
+  els.pixelGrid.style.setProperty("--grid-size", String(GRID_SIZE));
+  els.pixelGrid.style.setProperty("--pixel-lift", `${renderedShape.lift ?? 12}px`);
+  els.pixelGrid.style.setProperty("--pixel-side-depth", `${Math.max(6, Math.round((renderedShape.lift ?? 12) * 0.55))}px`);
+  applyBoardTilt();
 
   for (let rowIndex = 0; rowIndex < GRID_SIZE; rowIndex += 1) {
     const row = pattern[rowIndex] || ".".repeat(GRID_SIZE);
     for (let colIndex = 0; colIndex < GRID_SIZE; colIndex += 1) {
       const cell = document.createElement("div");
       cell.className = "cell";
-      if (row[colIndex] === "#") {
+      if (isFilledCell(row[colIndex])) {
         cell.dataset.active = "true";
+        cell.dataset.tone = getToneForCell(row[colIndex], renderedShape.toneMap);
+        applyCellTone(cell, cell.dataset.tone);
       }
       els.pixelGrid.appendChild(cell);
     }
   }
 }
 
+function applyBoardTilt() {
+  if (!els.pixelGrid) {
+    return;
+  }
+
+  els.pixelGrid.style.setProperty("--board-tilt-x", `${state.boardTiltX}deg`);
+  els.pixelGrid.style.setProperty("--board-tilt-y", `${state.boardTiltY}deg`);
+}
+
+function resetBoardTilt() {
+  state.boardTiltX = DEFAULT_BOARD_TILT_X;
+  state.boardTiltY = DEFAULT_BOARD_TILT_Y;
+  applyBoardTilt();
+}
+
+function stopBoardDrag(event) {
+  if (!boardDrag.active) {
+    return;
+  }
+
+  if (event?.pointerId != null && event.pointerId !== boardDrag.pointerId) {
+    return;
+  }
+
+  if (typeof els.pixelGrid?.releasePointerCapture === "function" && boardDrag.pointerId != null) {
+    try {
+      els.pixelGrid.releasePointerCapture(boardDrag.pointerId);
+    } catch (error) {
+      // Ignore release errors when capture has already ended.
+    }
+  }
+
+  boardDrag.active = false;
+  boardDrag.pointerId = null;
+  els.pixelGrid?.classList.remove("dragging");
+}
+
+function handleBoardPointerDown(event) {
+  if (event.button != null && event.button !== 0) {
+    return;
+  }
+
+  boardDrag.active = true;
+  boardDrag.pointerId = event.pointerId ?? null;
+  boardDrag.startX = event.clientX;
+  boardDrag.startY = event.clientY;
+  boardDrag.startTiltX = state.boardTiltX;
+  boardDrag.startTiltY = state.boardTiltY;
+  els.pixelGrid.classList.add("dragging");
+
+  if (typeof els.pixelGrid.setPointerCapture === "function" && event.pointerId != null) {
+    els.pixelGrid.setPointerCapture(event.pointerId);
+  }
+
+  event.preventDefault();
+}
+
+function handleBoardPointerMove(event) {
+  if (!boardDrag.active) {
+    return;
+  }
+
+  if (event.pointerId != null && boardDrag.pointerId != null && event.pointerId !== boardDrag.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - boardDrag.startX;
+  const deltaY = event.clientY - boardDrag.startY;
+  state.boardTiltY = clamp(
+    boardDrag.startTiltY + (deltaX * BOARD_DRAG_SENSITIVITY),
+    MIN_BOARD_TILT_Y,
+    MAX_BOARD_TILT_Y
+  );
+  state.boardTiltX = clamp(
+    boardDrag.startTiltX - (deltaY * BOARD_DRAG_SENSITIVITY),
+    MIN_BOARD_TILT_X,
+    MAX_BOARD_TILT_X
+  );
+  applyBoardTilt();
+}
+
+function attachFallbackBoardControls() {
+  if (boardRenderer || !els.pixelGrid) {
+    return;
+  }
+
+  els.pixelGrid.addEventListener("pointerdown", handleBoardPointerDown);
+  els.pixelGrid.addEventListener("lostpointercapture", stopBoardDrag);
+  window.addEventListener("pointermove", handleBoardPointerMove);
+  window.addEventListener("pointerup", stopBoardDrag);
+  window.addEventListener("pointercancel", stopBoardDrag);
+}
+
 function updateSkillCard() {
+  const subject = getCurrentSubject();
   const skill = getCurrentSkill();
-  if (!skill) {
+
+  if (!subject || !skill) {
     els.skillGradeLabel.textContent = "Math";
     els.skillTitle.textContent = "Choose a skill";
-    els.skillDescription.textContent = "This project is ready for multi-grade math practice once a skill is selected.";
+    els.skillDescription.textContent = "This project is ready for grade, subject, and skill-based practice.";
     els.tipBox.textContent = "";
     els.answerGuide.innerHTML = "";
     return;
   }
 
-  els.skillGradeLabel.textContent = getGradeLabel(skill.grade);
+  els.skillGradeLabel.textContent = `${getGradeLabel(skill.grade)} • ${subject.label}`;
   els.skillTitle.textContent = skill.label;
-  els.skillDescription.textContent = skill.description;
-  els.appSubtitle.textContent = `Choose a ${getGradeLabel(skill.grade).toLowerCase()} skill and reveal a hidden pixel picture one answer at a time.`;
+  els.skillDescription.textContent = `${subject.description} ${skill.description}`;
+  els.appSubtitle.textContent = "Choose a grade, subject, and skill, then reveal a hidden pixel picture as correct answers are entered.";
   els.tipBox.innerHTML = skill.answerType === "mixedFraction"
     ? `Use <strong>Tab</strong> or click to move between boxes.<br>${skill.answerHelp}<br>Example: <strong>1 1/5</strong> is entered as <strong>1</strong>, <strong>1</strong>, and <strong>5</strong>.`
     : `${skill.answerHelp}<br>Examples: <strong>-3</strong>, <strong>0.5</strong>, <strong>3/4</strong>, or <strong>1 1/2</strong>.`;
@@ -578,32 +978,45 @@ function getRevealGroups(activeCells) {
 
 function updatePixelArt() {
   const pattern = getCurrentPattern();
-  const cells = [...els.pixelGrid.children];
-  const active = [];
-
-  cells.forEach((cell, index) => {
+  const activeIndexes = [];
+  for (let index = 0; index < GRID_SIZE * GRID_SIZE; index += 1) {
     const row = Math.floor(index / GRID_SIZE);
     const col = index % GRID_SIZE;
-    if ((pattern[row] || "")[col] === "#") {
-      active.push(cell);
+    if (isFilledCell((pattern[row] || "")[col])) {
+      activeIndexes.push(index);
     }
-    cell.classList.remove("filled");
-  });
+  }
 
-  const revealGroups = getRevealGroups(active);
+  const revealGroups = getRevealGroups(activeIndexes);
   const correct = state.questions.map((_, index) => isAnswerCorrect(index));
 
-  revealGroups.forEach((group, index) => {
-    if (correct[index]) {
-      group.forEach((cell) => {
-        cell.classList.add("filled");
-      });
-    }
-  });
+  if (boardRenderer) {
+    const revealedIndexes = new Set();
+    revealGroups.forEach((group, index) => {
+      if (correct[index]) {
+        group.forEach((cellIndex) => {
+          revealedIndexes.add(cellIndex);
+        });
+      }
+    });
+    boardRenderer.setRevealedCellIndexes(revealedIndexes);
+  } else {
+    const cells = [...els.pixelGrid.children];
+    cells.forEach((cell) => {
+      cell.classList.remove("filled");
+    });
+    revealGroups.forEach((group, index) => {
+      if (correct[index]) {
+        group.forEach((cellIndex) => {
+          cells[cellIndex]?.classList.add("filled");
+        });
+      }
+    });
+  }
 
   const correctCount = correct.filter(Boolean).length;
   const shown = revealGroups.reduce((total, group, index) => total + (correct[index] ? group.length : 0), 0);
-  const pct = active.length ? Math.round((shown / active.length) * 100) : 0;
+  const pct = activeIndexes.length ? Math.round((shown / activeIndexes.length) * 100) : 0;
   els.correctCount.textContent = String(correctCount);
   els.progressCount.textContent = `${pct}%`;
   els.shapeName.textContent = state.shape;
@@ -611,9 +1024,30 @@ function updatePixelArt() {
   els.celebrateBox.classList.toggle("show", correctCount === QUESTION_COUNT);
 }
 
+function restoreStartupSelections(snapshot) {
+  state.area = snapshot.area;
+  state.theme = snapshot.theme;
+  state.shape = snapshot.shape;
+  state.grade = snapshot.grade;
+  state.subjectId = snapshot.subjectId;
+  state.skillId = snapshot.skillId;
+  state.boardTiltX = snapshot.boardTiltX;
+  state.boardTiltY = snapshot.boardTiltY;
+  populateThemeSelect();
+  populateGradeSelect();
+  populateSubjectSelect();
+  populateSkillSelect();
+  populateShapeSelect();
+  updateSkillCard();
+  if (!boardRenderer) {
+    applyBoardTilt();
+  }
+}
+
 function syncSelections() {
   state.theme = els.themeSelect.value;
   state.grade = els.gradeSelect.value;
+  state.subjectId = els.subjectSelect.value;
   state.skillId = els.skillSelect.value;
 }
 
@@ -644,12 +1078,23 @@ function toggleSolveButton() {
 }
 
 function runSelfTests() {
+  const snapshot = {
+    area: state.area,
+    theme: state.theme,
+    shape: state.shape,
+    grade: state.grade,
+    subjectId: state.subjectId,
+    skillId: state.skillId,
+    boardTiltX: state.boardTiltX,
+    boardTiltY: state.boardTiltY
+  };
   const tests = [];
   const assert = (name, condition) => tests.push({ name, pass: Boolean(condition) });
 
   assert("required elements are present", requiredElementsExist());
+  assert("curriculum exposes math as a learning area", areaCatalog.some((area) => area.id === "math"));
   assert("curriculum includes grades 7, 8, and 9", ["grade7", "grade8", "grade9"].every((grade) => gradeCatalog.some((entry) => entry.id === grade)));
-  assert("each grade exposes at least one skill", gradeCatalog.every((grade) => getSkillsForGrade(grade.id).length > 0));
+  assert("each grade exposes at least one subject", gradeCatalog.every((grade) => getSubjectsForGrade(grade.id).length > 0));
 
   const reduced = createRational(8, 12);
   assert("rational helper reduces 8/12 to 2/3", reduced && reduced.num === 2 && reduced.den === 3);
@@ -674,13 +1119,25 @@ function runSelfTests() {
   const themeShapes = getShapesForTheme("Cute");
   assert("Cute theme exposes shapes", Array.isArray(themeShapes) && themeShapes.includes("Heart") && themeShapes.includes("Flower"));
 
-  const allShapesHaveValidRows = Object.values(themes).every((shapeSet) => (
-    Object.values(shapeSet).every((rows) => rows.length === GRID_SIZE && rows.every((row) => row.length === GRID_SIZE))
+  const allShapesNormalizeToGrid = Object.entries(themes).every(([theme, shapeSet]) => (
+    Object.keys(shapeSet).every((shapeName) => {
+      const rows = getPattern(theme, shapeName);
+      return rows.length === GRID_SIZE && rows.every((row) => row.length === GRID_SIZE);
+    })
   ));
-  assert("all sprite patterns are 12 by 12", allShapesHaveValidRows);
+  assert("all sprites normalize to the render grid size", allShapesNormalizeToGrid);
+
+  const centeredSample = normalizePattern(["##", "##"], { gridSize: 6 });
+  assert("normalization centers smaller sprites", centeredSample[2].slice(2, 4) === "##" && centeredSample[3].slice(2, 4) === "##");
+
+  const scaledSample = normalizePattern(["####", "####", "####", "####"], { gridSize: 16 });
+  assert("larger boards scale sprites up from the original 12-cell baseline", scaledSample.some((row) => row.includes("#####")));
+  resetBoardView();
+  assert("board view reset works when the board renderer is available", !boardRenderer || typeof boardRenderer.resetView === "function");
+  assert("custom tone symbols are supported", getToneForCell("B", { B: "outline", R: "fill" }) === "outline" && getToneForCell("R", { B: "outline", R: "fill" }) === "fill");
 
   const heartColors = getShapeColors("Cute", "Heart");
-  assert("Heart shape has a pink color mapping", heartColors.pixel === "#ec4899");
+  assert("Heart shape exposes tuned heart colors", heartColors.pixel === "#ff1f1f" && heartColors.outline === "#111111");
 
   const moonColors = getShapeColors("Space", "Moon");
   assert("Moon shape has a space color mapping", moonColors.pixel === "#94a3b8");
@@ -692,15 +1149,22 @@ function runSelfTests() {
 
   populateGradeSelect();
   state.grade = "grade9";
+  populateSubjectSelect();
+  assert("Grade 9 exposes functions and graphing subject", els.subjectSelect.textContent.includes("Functions & Graphing"));
+
+  state.subjectId = "grade9-functions-graphing";
   populateSkillSelect();
-  assert("Grade 9 exposes slope skill", els.skillSelect.textContent.includes("Slope from Two Points"));
+  assert("functions subject exposes slope skill", els.skillSelect.textContent.includes("Slope from Two Points"));
+  assert("functions subject filters out two-step equations", !els.skillSelect.textContent.includes("Two-Step Equations"));
 
   const fractionSkill = getSkillById("grade7-fractions");
   const slopeSkill = getSkillById("grade9-slope");
   assert("fraction skill exists", Boolean(fractionSkill));
   assert("slope skill exists", Boolean(slopeSkill));
-  assert("fraction skill generates mixed-fraction questions", fractionSkill?.generateQuestion().answerType === "mixedFraction");
+  assert("fraction skill maps to a subject", fractionSkill?.subject === "grade7-number-sense");
   assert("slope skill generates text questions", slopeSkill?.generateQuestion().answerType === "text");
+  assert("object-based shape metadata is supported", getShapeDefinition("Game", "Sword").scale > 1 && getShapeDefinition("Space", "UFO").lift > 12);
+  assert("heart sprite supports tone metadata", getShapeDefinition("Cute", "Heart").toneMap?.B === "outline");
 
   const sampleCells = Array.from({ length: 43 }, (_, id) => ({ id }));
   const revealGroups = getRevealGroups(sampleCells);
@@ -713,15 +1177,18 @@ function runSelfTests() {
   state.theme = "Cute";
   state.shape = "Heart";
   buildPixelGrid();
-  assert("pixel grid renders 144 cells", els.pixelGrid.children.length === GRID_SIZE * GRID_SIZE);
+  assert("pixel board renderer initializes", Boolean(boardRenderer) || els.pixelGrid.children.length === GRID_SIZE * GRID_SIZE);
+  assert("pixel board tracks the full board size", !boardRenderer || boardRenderer.blankCount === GRID_SIZE * GRID_SIZE);
 
   state.grade = "grade7";
+  state.subjectId = "grade7-number-sense";
   state.skillId = "grade7-fractions";
   updateSkillCard();
   state.questions = [{ text: "1/4 + 1/4", answerType: "mixedFraction", solution: createRational(1, 2) }];
   state.answers = [{ whole: "", num: "1", den: "2" }];
   renderQuestions();
   assert("fraction rows render three inputs", els.questionBody.querySelectorAll("input").length === 3);
+  assert("skill kicker includes subject label", els.skillGradeLabel.textContent.includes("Number Sense"));
   assert("fraction guide shows whole numerator denominator labels", ["Whole", "Numerator", "Denominator"].every((label) => els.answerGuide.textContent.includes(label)));
 
   updateQuestionStatuses();
@@ -734,6 +1201,7 @@ function runSelfTests() {
   assert("unsimplified equivalent answers prompt simplify", els.questionBody.querySelector(".status-cell")?.textContent.includes("Simplify"));
 
   state.grade = "grade8";
+  state.subjectId = "grade8-algebra-foundations";
   state.skillId = "grade8-equations";
   updateSkillCard();
   state.questions = [{ text: "Solve: x + 2 = 5", answerType: "text", solution: createRational(3, 1) }];
@@ -755,6 +1223,8 @@ function runSelfTests() {
   if (failed) {
     console.error("Self-tests failed", tests.filter((test) => !test.pass));
   }
+
+  restoreStartupSelections(snapshot);
 }
 
 function init() {
@@ -766,11 +1236,18 @@ function init() {
 
   populateThemeSelect();
   populateGradeSelect();
+  populateSubjectSelect();
   populateSkillSelect();
   populateShapeSelect();
+  initializeBoardRenderer();
+  if (!boardRenderer) {
+    applyBoardTilt();
+    attachFallbackBoardControls();
+  }
   updateSkillCard();
 
   els.appTitle.addEventListener("dblclick", toggleSolveButton);
+  els.pixelGrid.addEventListener("dblclick", resetBoardView);
   els.newPuzzleBtn.addEventListener("click", newPuzzle);
   els.resetBtn.addEventListener("click", resetAnswers);
   els.solveAllBtn.addEventListener("click", solveAllAnswers);
@@ -782,7 +1259,15 @@ function init() {
   els.shapeSelect.addEventListener("change", newPuzzle);
   els.gradeSelect.addEventListener("change", () => {
     state.grade = els.gradeSelect.value;
-    state.skillId = getSkillsForGrade(state.grade)[0]?.id || "";
+    state.subjectId = getSubjectsForGrade(state.grade)[0]?.id || "";
+    populateSubjectSelect();
+    state.skillId = getSkillsForSelection(state.grade, state.subjectId)[0]?.id || "";
+    populateSkillSelect();
+    newPuzzle();
+  });
+  els.subjectSelect.addEventListener("change", () => {
+    state.subjectId = els.subjectSelect.value;
+    state.skillId = getSkillsForSelection(state.grade, state.subjectId)[0]?.id || "";
     populateSkillSelect();
     newPuzzle();
   });
